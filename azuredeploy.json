@@ -20,49 +20,10 @@
         "description": "SSH rsa public key file as a string."
       }
     },
-    "dnsNameForPublicIP": {
-      "type": "string",
-      "metadata": {
-        "description": "Unique DNS Name for the Public IP used to access the Virtual Machine."
-      }
-    },
-    "AADClientID": {
-      "type": "string",
-      "metadata": {
-        "description": "Client ID of AAD app which has permissions to KeyVault"
-      }
-    },
     "AADObjectID": {
       "type": "string",
       "metadata": {
         "description": "Object ID of AAD app which has permissions to KeyVault. azure ad sp show --search appName"
-      }
-    },
-    "AADClientSecret": {
-      "type": "securestring",
-      "metadata": {
-        "description": "Client Secret of AAD app which has permissions to KeyVault"
-      }
-    },
-    "VolumeType": {
-      "type": "string",
-      "defaultValue": "Data",
-      "metadata": {
-      "description": "Type of the volume to perform encryption operation. For Linux VMs allowed volume type is Data only"
-      }
-    },
-    "sequenceVersion": {
-      "type": "string",
-      "defaultValue": "2",
-      "metadata": {
-        "description": "sequence version of the bitlocker operation. Increment this everytime an operation is performed on the same VM"
-      }
-    },
-    "Passphrase": {
-      "type": "securestring",
-      "defaultValue": null,
-      "metadata": {
-        "description": "the passphrase specified."
       }
     },
     "tenantId": {
@@ -75,34 +36,19 @@
   },
   "variables": {
     "location": "North Central US",
-    "virtualNetworkName": "podVNET",
-    "vnetID": "[resourceId('Microsoft.Network/virtualNetworks',variables('virtualNetworkName'))]",
     "vnetCidrBlock": "10.0.0.0/16",
-    "privateSubnetName": "privateSubnet",
     "subnetPrivateCidrBlock": "10.0.16.0/20",
-    "privateSubnetRef": "[concat(variables('vnetID'),'/subnets/',variables('privateSubnetName'))]",
-    "publicSubnetName": "publicSubnet",
     "subnetPublicCidrBlock": "10.0.128.0/20",
-    "storageAccountName": "podSA",
     "storageAccountType": "Standard_LRS",
-    "keyVaultName": "podKeyVault",
-    "publicIPAddressName": "podPublicIP",
-    "publicIPAddressType": "Dynamic",
     "imagePublisher": "Canonical",
     "imageOffer": "UbuntuServer",
-    "OSDiskName": "linuxEncrytedDisk",
-    "nicName": "podNic",
-    "vmStorageAccountContainerName": "vhds",
-    "vmName": "mgmt01",
-    "vmSize": "Standard_D3_v2",
-    "sshKeyPath": "[concat('/home/',parameters('adminUsername'),'/.ssh/authorized_keys')]",
     "ubuntuOSVersion": "14.04.2-LTS"
   },
   "resources": [
     {
-      "apiVersion": "2015-05-01-preview",
+      "name": "podVNET",
       "type": "Microsoft.Network/virtualNetworks",
-      "name": "[variables('virtualNetworkName')]",
+      "apiVersion": "2015-05-01-preview",
       "location": "[variables('location')]",
       "properties": {
         "addressSpace": {
@@ -112,13 +58,13 @@
         },
         "subnets": [
           {
-            "name": "[variables('privateSubnetName')]",
+            "name": "privateSubnet",
             "properties": {
               "addressPrefix": "[variables('subnetPrivateCidrBlock')]"
             }
           },
           {
-            "name": "[variables('publicSubnetName')]",
+            "name": "publicSubnet",
             "properties": {
               "addressPrefix": "[variables('subnetPublicCidrBlock')]"
             }
@@ -127,8 +73,8 @@
       }
     },
     {
+      "name": "podSA",
       "type": "Microsoft.Storage/storageAccounts",
-      "name": "[variables('storageAccountName')]",
       "apiVersion": "2015-05-01-preview",
       "location": "[variables('location')]",
       "properties": {
@@ -136,8 +82,8 @@
       }
     },
     {
+      "name": "podKeyVault",
       "type": "Microsoft.KeyVault/vaults",
-      "name": "[variables('keyVaultName')]",
       "apiVersion": "2015-06-01",
       "location": "[variables('location')]",
       "properties": {
@@ -159,25 +105,25 @@
       }
     },    
     {
+      "name": "bastionPublicIP",
       "type": "Microsoft.Network/publicIPAddresses",
-      "name": "[variables('publicIPAddressName')]",
       "apiVersion": "2015-05-01-preview",
       "location": "[variables('location')]",
       "properties": {
-        "publicIPAllocationMethod": "[variables('publicIPAddressType')]",
+        "publicIPAllocationMethod": "Dynamic",
         "dnsSettings": {
-          "domainNameLabel": "[parameters('dnsNameForPublicIP')]"
+          "domainNameLabel": "bastion"
         }
       }
     },
     {
-      "apiVersion": "2015-05-01-preview",
+      "name": "bastionNic",
       "type": "Microsoft.Network/networkInterfaces",
-      "name": "[variables('nicName')]",
+      "apiVersion": "2015-05-01-preview",
       "location": "[variables('location')]",
       "dependsOn": [
-        "[concat('Microsoft.Network/publicIPAddresses/', variables('publicIPAddressName'))]",
-        "[concat('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]"
+        "Microsoft.Network/publicIPAddresses/bastionPublicIP",
+        "Microsoft.Network/virtualNetworks/podVNET"
       ],
       "properties": {
         "ipConfigurations": [
@@ -186,10 +132,10 @@
             "properties": {
               "privateIPAllocationMethod": "Dynamic",
               "publicIPAddress": {
-                "id": "[resourceId('Microsoft.Network/publicIPAddresses',variables('publicIPAddressName'))]"
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', 'bastionPublicIP')]"
               },
               "subnet": {
-                "id": "[variables('privateSubnetRef')]"
+                "id": "[concat(resourceId('Microsoft.Network/virtualNetworks', 'podVNET'),'/subnets/privateSubnet')]"
               }
             }
           }
@@ -197,20 +143,20 @@
       }
     },
     {
-      "apiVersion": "2015-06-15",
+      "name": "bastion",
       "type": "Microsoft.Compute/virtualMachines",
-      "name": "[variables('vmName')]",
+      "apiVersion": "2015-06-15",
       "location": "[variables('location')]",
       "dependsOn": [
-        "[concat('Microsoft.Storage/storageAccounts/', variables('storageAccountName'))]",
-        "[concat('Microsoft.Network/networkInterfaces/', variables('nicName'))]"
+        "Microsoft.Storage/storageAccounts/podSA",
+        "Microsoft.Network/networkInterfaces/bastionNic"
       ],
       "properties": {
         "hardwareProfile": {
-          "vmSize": "[variables('vmSize')]"
+          "vmSize": "Standard_D1_v2"
         },
         "osProfile": {
-          "computername": "[variables('vmName')]",
+          "computername": "bastion",
           "adminUsername": "[parameters('adminUsername')]",
           "adminPassword": "[parameters('adminPassword')]",
           "linuxConfiguration": {
@@ -218,7 +164,7 @@
             "ssh": {
               "publicKeys": [
                 {
-                  "path": "[variables('sshKeyPath')]",
+                  "path": "[concat('/home/', parameters('adminUsername'), '/.ssh/authorized_keys')]",
                   "keyData": "[parameters('sshKeyData')]"
                 }
               ]
@@ -235,7 +181,7 @@
           "osDisk": {
             "name": "osdisk",
             "vhd": {
-              "uri": "[concat('http://',variables('storageAccountName'),'.blob.core.windows.net/',variables('vmStorageAccountContainerName'),'/',variables('OSDiskName'),'.vhd')]"
+              "uri": "[concat('http://podSA.blob.core.windows.net/vhds/bastionRoot.vhd')]"
             },
             "caching": "ReadWrite",
             "createOption": "FromImage"
@@ -244,56 +190,9 @@
         "networkProfile": {
           "networkInterfaces": [
             {
-              "id": "[resourceId('Microsoft.Network/networkInterfaces',variables('nicName'))]"
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', 'bastionNic')]"
             }
           ]
-        },
-        "diagnosticsProfile": {
-          "bootDiagnostics": {
-             "enabled": "true",
-             "storageUri": "[concat('http://',variables('storageAccountName'),'.blob.core.windows.net')]"
-          }
-        }
-      }
-    },
-    {
-      "name": "UpdateEncryptionSettings",
-      "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2015-01-01",
-      "dependsOn": [
-        "[concat('Microsoft.Compute/virtualMachines/', variables('vmName'))]"
-      ],
-      "properties": {
-        "mode": "Incremental",
-        "templateLink": {
-          "uri": "https://raw.githubusercontent.com/catalyzeio/arm-testing/master/updateencryptionsettings.json",
-          "contentVersion": "1.0.0.0"
-        },
-        "parameters": {
-          "vmName": {
-            "value": "[variables('vmName')]"
-          },
-          "AADClientID": {
-            "value": "[parameters('AADClientID')]"
-          },
-          "AADClientSecret": {
-            "value": "[parameters('AADClientSecret')]"
-          },
-          "KeyVaultResourceID": {
-            "value": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
-          },
-          "KeyVaultURL": {
-            "value": "[reference(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))).vaultUri]"
-          },
-          "Passphrase": {
-            "value": "[parameters('Passphrase')]"
-          },
-          "sequenceVersion": {
-            "value": "[parameters('sequenceVersion')]"
-          },
-          "VolumeType": {
-            "value": "[parameters('VolumeType')]"
-          }
         }
       }
     }
